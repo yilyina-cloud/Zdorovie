@@ -1,0 +1,216 @@
+openapi: 3.2.0
+
+info:
+  title: Здоровье+ — API записей пациента
+  version: 1.0.0
+  description: Фрагмент API мобильного приложения для просмотра своих записей.
+
+servers:
+  - url: /api/v1
+
+paths:
+  /appointments:
+    get:
+      operationId: getMyAppointments
+      summary: Получить свои записи к врачу
+      description: |
+        Пациент определяется по проверенному access token.
+        Доступ к записям других пациентов исключён.
+        По умолчанию возвращаются предстоящие подтверждённые записи.
+        Сортировка — по startsAt, затем appointmentId, по возрастанию.
+      security:
+        - bearerAuth: []
+
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: |
+            upcoming — подтверждённые записи с временем начала
+            позже текущего времени сервера;
+            completed — завершённые;
+            cancelled — отменённые.
+          schema:
+            type: string
+            enum: [upcoming, completed, cancelled]
+            default: upcoming
+
+        - name: limit
+          in: query
+          required: false
+          description: Максимальное количество записей в ответе.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+
+        - name: offset
+          in: query
+          required: false
+          description: Количество записей, которые нужно пропустить.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+
+      responses:
+        "200":
+          description: |
+            Список записей получен.
+            Если записей нет или offset выходит за пределы списка,
+            возвращается пустой массив items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppointmentList"
+              examples:
+                upcoming:
+                  summary: Предстоящая запись
+                  value:
+                    items:
+                      - appointmentId: "apt-1001"
+                        status: confirmed
+                        startsAt: "2026-12-10T10:00:00+03:00"
+                        doctor:
+                          doctorId: "doc-42"
+                          name: "Анна Иванова"
+                          specialty: "Терапевт"
+                        clinic:
+                          clinicId: "clinic-01"
+                          name: "Здоровье+ — Москва"
+                          address: "Москва, ул. Примерная, д. 10"
+                    limit: 20
+                    offset: 0
+                    total: 1
+                empty:
+                  summary: Нет подходящих записей
+                  value:
+                    items: []
+                    limit: 20
+                    offset: 0
+                    total: 0
+
+        "400":
+          description: Некорректные параметры фильтрации или пагинации.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: INVALID_PARAMETERS
+                message: "limit должен быть от 1 до 100."
+                traceId: "trace-400-001"
+
+        "401":
+          description: Access token отсутствует, недействителен или истёк.
+          headers:
+            WWW-Authenticate:
+              description: Требуется аутентификация Bearer.
+              schema:
+                type: string
+              example: 'Bearer realm="health-plus"'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: UNAUTHORIZED
+                message: "Необходимо войти в приложение."
+                traceId: "trace-401-001"
+
+        "500":
+          description: Внутренняя ошибка сервера.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: INTERNAL_ERROR
+                message: "Не удалось получить записи. Повторите запрос позже."
+                traceId: "trace-500-001"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Access token, полученный через сервис аутентификации.
+        Передаётся в заголовке Authorization: Bearer <access_token>.
+        Все запросы выполняются по HTTPS.
+
+  schemas:
+    AppointmentList:
+      type: object
+      required: [items, limit, offset, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Appointment"
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
+          description: |
+            Общее количество записей пациента после фильтрации,
+            до применения limit и offset.
+
+    Appointment:
+      type: object
+      required: [appointmentId, status, startsAt, doctor, clinic]
+      properties:
+        appointmentId:
+          type: string
+          description: Идентификатор записи в системе расписания.
+        status:
+          type: string
+          enum: [confirmed, completed, cancelled]
+          description: |
+            Состояние записи. upcoming — фильтр по будущему времени
+            и состоянию confirmed, а не отдельное состояние записи.
+        startsAt:
+          type: string
+          format: date-time
+          description: Дата и время начала приёма с часовым смещением.
+        doctor:
+          type: object
+          required: [doctorId, name, specialty]
+          properties:
+            doctorId:
+              type: string
+            name:
+              type: string
+            specialty:
+              type: string
+        clinic:
+          type: object
+          required: [clinicId, name, address]
+          properties:
+            clinicId:
+              type: string
+            name:
+              type: string
+            address:
+              type: string
+
+    Error:
+      type: object
+      required: [code, message, traceId]
+      properties:
+        code:
+          type: string
+          description: Машиночитаемый код ошибки.
+        message:
+          type: string
+          description: Сообщение без внутренних технических деталей.
+        traceId:
+          type: string
+          description: Идентификатор для поиска запроса в логах и трассировке.
